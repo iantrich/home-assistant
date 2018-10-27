@@ -278,7 +278,6 @@ class DeleteShoppingListItemView(http.HomeAssistantView):
 
     async def get(self, request, item_id):
         """Delete a shopping list item."""
-
         try:
             hass = request.app['hass']
             hass.data[DOMAIN].async_delete(item_id)
