@@ -15,6 +15,7 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.util.json import load_json, save_json
 from homeassistant.components import websocket_api
 
+ATTR_LIST_ID = 'list_id'
 ATTR_NAME = 'name'
 
 DOMAIN = 'shopping_list'
@@ -34,7 +35,8 @@ SERVICE_ADD_ITEM = 'add_item'
 SERVICE_COMPLETE_ITEM = 'complete_item'
 
 SERVICE_ITEM_SCHEMA = vol.Schema({
-    vol.Required(ATTR_NAME): vol.Any(None, cv.string)
+    vol.Required(ATTR_NAME): vol.Any(None, cv.string),
+    vol.Optional(ATTR_LIST_ID, 0): cv.string
 })
 
 WS_TYPE_SHOPPING_LIST_LISTS = 'shopping_list/lists'
@@ -83,24 +85,25 @@ def async_setup(hass, config):
     def add_item_service(call):
         """Add an item with `name`."""
         data = hass.data[DOMAIN]
+        list_id = call.data.get(ATTR_LIST_ID)
         name = call.data.get(ATTR_NAME)
         if name is not None:
-            data.async_add(0, name)
+            data.async_add(list_id, name)
 
     @asyncio.coroutine
     def complete_item_service(call):
         """Mark the item provided via `name` as completed."""
         data = hass.data[DOMAIN]
+        list_id = call.data.get(ATTR_LIST_ID)
         name = call.data.get(ATTR_NAME)
         if name is None:
             return
         try:
-            # TODO
-            item = [item for item in data.items if item['name'] == name][0]
+            item = [item for item in data.lists[list_id].items if item['name'] == name][0]
         except IndexError:
             _LOGGER.error("Removing of item failed: %s cannot be found", name)
         else:
-            data.async_update(0, item['id'], {'name': name, 'complete': True})
+            data.async_update(list_id, item['id'], {'name': name, 'complete': True})
 
     data = hass.data[DOMAIN] = ShoppingData(hass)
     yield from data.async_load()
@@ -164,18 +167,6 @@ class ShoppingData:
         self.lists = []
 
     @callback
-    def async_add_list(self, list_id, name):
-        """Add a shopping list item."""
-        lis = {
-            'name': name,
-            'id': uuid.uuid4().hex,
-            'items': []
-        }
-        self.lists.append(lis)
-        self.hass.async_add_job(self.save)
-        return lis
-
-    @callback
     def async_add_item(self, list_id, name):
         """Add a shopping list item."""
         item = {
@@ -207,7 +198,6 @@ class ShoppingData:
             raise KeyError
 
         info = ITEM_UPDATE_SCHEMA(info)
-        # TODO Save back to self.lists
         item.update(info)
         self.hass.async_add_job(self.save)
         return item
@@ -221,7 +211,6 @@ class ShoppingData:
             raise KeyError
 
         lis.items = [itm for itm in lis.items if not itm['complete']]
-        # TODO Save back to self.lists
         self.hass.async_add_job(self.save)
 
     @asyncio.coroutine
@@ -231,8 +220,17 @@ class ShoppingData:
             """Load the items synchronously."""
             return load_json(self.hass.config.path(PERSISTENCE), default=[])
 
-        # TODO Need to create a default Inbox list if it doesn't already exist with id 0
         self.lists = yield from self.hass.async_add_job(load)
+        lis = next((li for li in self.lists if li['id'] == 0), None)
+
+        if lis is None:
+            # TODO Should I worry about migrating existing lists?
+            self.lists = {
+                'name': 'Inbox',
+                'id': 0,
+                'items': []
+            }
+            self.hass.async_add_job(self.save)
 
     def save(self):
         """Save the items."""
