@@ -36,7 +36,7 @@ SERVICE_COMPLETE_ITEM = 'complete_item'
 
 SERVICE_ITEM_SCHEMA = vol.Schema({
     vol.Required(ATTR_NAME): vol.Any(None, cv.string),
-    vol.Optional(ATTR_LIST_ID, 0): cv.string
+    vol.Optional(ATTR_LIST_ID, '0'): cv.string
 })
 
 WS_TYPE_SHOPPING_LIST_LISTS = 'shopping_list/lists'
@@ -88,7 +88,7 @@ def async_setup(hass, config):
         list_id = call.data.get(ATTR_LIST_ID)
         name = call.data.get(ATTR_NAME)
         if name is not None:
-            data.async_add(list_id, name)
+            data.async_add_item(list_id, name)
 
     @asyncio.coroutine
     def complete_item_service(call):
@@ -99,11 +99,13 @@ def async_setup(hass, config):
         if name is None:
             return
         try:
-            item = [item for item in data.lists[list_id].items if item['name'] == name][0]
+            lis = next((li for li in data.lists if li['id'] == list_id), None)
+            item = [item for item in lis['items'] if item['name'] == name][0]
         except IndexError:
             _LOGGER.error("Removing of item failed: %s cannot be found", name)
         else:
-            data.async_update(list_id, item['id'], {'name': name, 'complete': True})
+            data.async_update(list_id, item['id'], {
+                              'name': name, 'complete': True})
 
     data = hass.data[DOMAIN] = ShoppingData(hass)
     yield from data.async_load()
@@ -180,7 +182,7 @@ class ShoppingData:
         if lis is None:
             raise KeyError
 
-        lis.items.append(item)
+        lis['items'].append(item)
         self.hass.async_add_job(self.save)
         return item
 
@@ -192,7 +194,7 @@ class ShoppingData:
         if lis is None:
             raise KeyError
 
-        item = next((itm for itm in lis.items if itm['id'] == item_id), None)
+        item = next((itm for itm in lis['items'] if itm['id'] == item_id), None)
 
         if item is None:
             raise KeyError
@@ -210,7 +212,7 @@ class ShoppingData:
         if lis is None:
             raise KeyError
 
-        lis.items = [itm for itm in lis.items if not itm['complete']]
+        lis['items'] = [itm for itm in lis['items'] if not itm['complete']]
         self.hass.async_add_job(self.save)
 
     @asyncio.coroutine
@@ -221,15 +223,17 @@ class ShoppingData:
             return load_json(self.hass.config.path(PERSISTENCE), default=[])
 
         self.lists = yield from self.hass.async_add_job(load)
-        lis = next((li for li in self.lists if li['id'] == 0), None)
+        _LOGGER.error(self.lists)
+        _LOGGER.error(type(self.lists))
+        lis = next((li for li in self.lists if li['id'] == '0'), None)
 
         if lis is None:
             # TODO Should I worry about migrating existing lists?
             self.lists = {
                 'name': 'Inbox',
-                'id': 0,
+                'id': '0',
                 'items': []
-            }
+            },
             self.hass.async_add_job(self.save)
 
     def save(self):
@@ -250,7 +254,7 @@ class AddItemIntent(intent.IntentHandler):
         """Handle the intent."""
         slots = self.async_validate_slots(intent_obj.slots)
         item = slots['item']['value']
-        intent_obj.hass.data[DOMAIN].async_add(0, item)
+        intent_obj.hass.data[DOMAIN].async_add_item('0', item)
 
         response = intent_obj.create_response()
         response.async_set_speech(
@@ -270,7 +274,10 @@ class ListTopItemsIntent(intent.IntentHandler):
     @asyncio.coroutine
     def async_handle(self, intent_obj):
         """Handle the intent."""
-        items = intent_obj.hass.data[DOMAIN].lists[0].items[-5:]
+        lis = next(
+            (li for li in intent_obj.hass.data[DOMAIN].lists if li['id']
+             == '0'), None)
+        items = lis['items'][-5:]
         response = intent_obj.create_response()
 
         if not items:
@@ -293,7 +300,10 @@ class ShoppingListView(http.HomeAssistantView):
     @callback
     def get(self, request):
         """Retrieve shopping list items."""
-        return self.json(request.app['hass'].data[DOMAIN].lists[0].items)
+        lis = next(
+            (li for li in request.app['hass'].data[DOMAIN].lists if li['id']
+             == '0'), None)
+        return self.json(lis['items'])
 
 
 class UpdateShoppingListItemView(http.HomeAssistantView):
@@ -307,7 +317,8 @@ class UpdateShoppingListItemView(http.HomeAssistantView):
         data = await request.json()
 
         try:
-            item = request.app['hass'].data[DOMAIN].async_update(0, item_id, data)
+            item = request.app['hass'].data[DOMAIN].async_update(
+                '0', item_id, data)
             request.app['hass'].bus.async_fire(EVENT)
             return self.json(item)
         except KeyError:
@@ -328,7 +339,7 @@ class CreateShoppingListItemView(http.HomeAssistantView):
     @asyncio.coroutine
     def post(self, request, data):
         """Create a new shopping list item."""
-        item = request.app['hass'].data[DOMAIN].async_add(0, data['name'])
+        item = request.app['hass'].data[DOMAIN].async_add_item('0', data['name'])
         request.app['hass'].bus.async_fire(EVENT)
         return self.json(item)
 
@@ -343,7 +354,7 @@ class ClearCompletedItemsView(http.HomeAssistantView):
     def post(self, request):
         """Retrieve if API is running."""
         hass = request.app['hass']
-        hass.data[DOMAIN].async_clear_completed(0)
+        hass.data[DOMAIN].async_clear_completed('0')
         hass.bus.async_fire(EVENT)
         return self.json_message('Cleared completed items.')
 
@@ -359,14 +370,16 @@ def websocket_handle_lists(hass, connection, msg):
 def websocket_handle_items(hass, connection, msg):
     """Handle get shopping_list items."""
     list_id = msg['list_id']
+    lis = next(
+        (li for li in hass.data[DOMAIN].lists if li['id'] == list_id), None)
     connection.send_message(websocket_api.result_message(
-        msg['id'], hass.data[DOMAIN].lists[list_id].items))
+        msg['id'], lis['items']))
 
 
 @callback
 def websocket_handle_add(hass, connection, msg):
     """Handle add item to shopping_list."""
-    item = hass.data[DOMAIN].async_add(msg['list_id'], msg['name'])
+    item = hass.data[DOMAIN].async_add_item(msg['list_id'], msg['name'])
     hass.bus.async_fire(EVENT)
     connection.send_message(websocket_api.result_message(
         msg['id'], item))

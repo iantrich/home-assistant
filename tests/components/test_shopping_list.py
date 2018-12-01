@@ -94,6 +94,7 @@ async def test_ws_get_items(hass, hass_ws_client):
     await client.send_json({
         'id': 5,
         'type': 'shopping_list/items',
+        'list_id': 0,
     })
     msg = await client.receive_json()
     assert msg['success'] is True
@@ -174,12 +175,13 @@ async def test_ws_update_item(hass, hass_ws_client):
         hass, 'test', 'HassShoppingListAddItem', {'item': {'value': 'wine'}}
     )
 
-    beer_id = hass.data['shopping_list'].items[0]['id']
-    wine_id = hass.data['shopping_list'].items[1]['id']
+    beer_id = hass.data['shopping_list'].lists[0].items[0]['id']
+    wine_id = hass.data['shopping_list'].lists[0].items[1]['id']
     client = await hass_ws_client(hass)
     await client.send_json({
         'id': 5,
         'type': 'shopping_list/items/update',
+        'list_id': 0,
         'item_id': beer_id,
         'name': 'soda'
     })
@@ -187,6 +189,7 @@ async def test_ws_update_item(hass, hass_ws_client):
     assert msg['success'] is True
     data = msg['result']
     assert data == {
+        'list_id': 0,
         'id': beer_id,
         'name': 'soda',
         'complete': False
@@ -194,6 +197,7 @@ async def test_ws_update_item(hass, hass_ws_client):
     await client.send_json({
         'id': 6,
         'type': 'shopping_list/items/update',
+        'list_id': 0,
         'item_id': wine_id,
         'complete': True
     })
@@ -201,18 +205,21 @@ async def test_ws_update_item(hass, hass_ws_client):
     assert msg['success'] is True
     data = msg['result']
     assert data == {
+        'list_id': 0,
         'id': wine_id,
         'name': 'wine',
         'complete': True
     }
 
-    beer, wine = hass.data['shopping_list'].items
+    beer, wine = hass.data['shopping_list'].lists[0].items
     assert beer == {
+        'list_id': 0,
         'id': beer_id,
         'name': 'soda',
         'complete': False
     }
     assert wine == {
+        'list_id': 0,
         'id': wine_id,
         'name': 'wine',
         'complete': True
@@ -255,6 +262,7 @@ async def test_ws_update_item_fail(hass, hass_ws_client):
     await client.send_json({
         'id': 5,
         'type': 'shopping_list/items/update',
+        'list_id': 0,
         'item_id': 'non_existing',
         'name': 'soda'
     })
@@ -268,6 +276,7 @@ async def test_ws_update_item_fail(hass, hass_ws_client):
     await client.send_json({
         'id': 6,
         'type': 'shopping_list/items/update',
+        'list_id': 0,
         'name': 123,
     })
     msg = await client.receive_json()
@@ -388,15 +397,18 @@ async def test_ws_add_item(hass, hass_ws_client):
     await client.send_json({
         'id': 5,
         'type': 'shopping_list/items/add',
+        'list_id': 0,
         'name': 'soda',
     })
     msg = await client.receive_json()
     assert msg['success'] is True
     data = msg['result']
+    assert data['list-id'] == 0
     assert data['name'] == 'soda'
     assert data['complete'] is False
-    items = hass.data['shopping_list'].items
+    items = hass.data['shopping_list'].lists[0].items
     assert len(items) == 1
+    assert data['list-id'] == 0
     assert items[0]['name'] == 'soda'
     assert items[0]['complete'] is False
 
@@ -408,6 +420,7 @@ async def test_ws_add_item_fail(hass, hass_ws_client):
     await client.send_json({
         'id': 5,
         'type': 'shopping_list/items/add',
+        'list_id': 0,
         'name': 123,
     })
     msg = await client.receive_json()
