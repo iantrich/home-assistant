@@ -74,7 +74,8 @@ SCHEMA_WEBSOCKET_UPDATE_ITEM = \
 
 SCHEMA_WEBSOCKET_CLEAR_ITEMS = \
     websocket_api.BASE_COMMAND_MESSAGE_SCHEMA.extend({
-        vol.Required('type'): WS_TYPE_SHOPPING_LIST_CLEAR_ITEMS
+        vol.Required('type'): WS_TYPE_SHOPPING_LIST_CLEAR_ITEMS,
+        vol.Required('list_id'): str,
     })
 
 
@@ -104,8 +105,7 @@ def async_setup(hass, config):
         except IndexError:
             _LOGGER.error("Removing of item failed: %s cannot be found", name)
         else:
-            data.async_update(list_id, item['id'], {
-                              'name': name, 'complete': True})
+            data.async_update(list_id, item['id'], {'name': name, 'complete': True})
 
     data = hass.data[DOMAIN] = ShoppingData(hass)
     yield from data.async_load()
@@ -194,7 +194,8 @@ class ShoppingData:
         if lis is None:
             raise KeyError
 
-        item = next((itm for itm in lis['items'] if itm['id'] == item_id), None)
+        item = next(
+            (itm for itm in lis['items'] if itm['id'] == item_id), None)
 
         if item is None:
             raise KeyError
@@ -339,7 +340,8 @@ class CreateShoppingListItemView(http.HomeAssistantView):
     @asyncio.coroutine
     def post(self, request, data):
         """Create a new shopping list item."""
-        item = request.app['hass'].data[DOMAIN].async_add_item('0', data['name'])
+        item = request.app['hass'].data[DOMAIN].async_add_item(
+            '0', data['name'])
         request.app['hass'].bus.async_fire(EVENT)
         return self.json(item)
 
@@ -407,6 +409,6 @@ async def websocket_handle_update(hass, connection, msg):
 @callback
 def websocket_handle_clear(hass, connection, msg):
     """Handle clearing shopping_list items."""
-    hass.data[DOMAIN].async_clear_completed()
+    hass.data[DOMAIN].async_clear_completed(msg['list_id'])
     hass.bus.async_fire(EVENT)
     connection.send_message(websocket_api.result_message(msg['id']))
