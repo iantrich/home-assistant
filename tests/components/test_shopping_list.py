@@ -1,12 +1,15 @@
 """Test shopping list component."""
 import asyncio
 from unittest.mock import patch
+import logging
 
 import pytest
 
 from homeassistant.bootstrap import async_setup_component
 from homeassistant.helpers import intent
 from homeassistant.components.websocket_api.const import TYPE_RESULT
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True)
@@ -122,8 +125,8 @@ def test_deprecated_api_update(hass, hass_client):
         hass, 'test', 'HassShoppingListAddItem', {'item': {'value': 'wine'}}
     )
 
-    beer_id = hass.data['shopping_list'].lists[0].items[0]['id']
-    wine_id = hass.data['shopping_list'].lists[0].items[1]['id']
+    beer_id = hass.data['shopping_list'].lists[0]['items'][0]['id']
+    wine_id = hass.data['shopping_list'].lists[0]['items'][1]['id']
 
     client = yield from hass_client()
     resp = yield from client.post(
@@ -154,7 +157,7 @@ def test_deprecated_api_update(hass, hass_client):
         'complete': True
     }
 
-    beer, wine = hass.data['shopping_list'].items
+    beer, wine = hass.data['shopping_list'].lists[0]['items']
     assert beer == {
         'list_id': '0',
         'id': beer_id,
@@ -179,8 +182,8 @@ async def test_ws_update_item(hass, hass_ws_client):
         hass, 'test', 'HassShoppingListAddItem', {'item': {'value': 'wine'}}
     )
 
-    beer_id = hass.data['shopping_list'].lists[0].items[0]['id']
-    wine_id = hass.data['shopping_list'].lists[0].items[1]['id']
+    beer_id = hass.data['shopping_list'].lists[0]['items'][0]['id']
+    wine_id = hass.data['shopping_list'].lists[0]['items'][1]['id']
     client = await hass_ws_client(hass)
     await client.send_json({
         'id': 5,
@@ -215,7 +218,7 @@ async def test_ws_update_item(hass, hass_ws_client):
         'complete': True
     }
 
-    beer, wine = hass.data['shopping_list'].lists[0].items
+    beer, wine = hass.data['shopping_list'].lists[0]['items']
     assert beer == {
         'list_id': '0',
         'id': beer_id,
@@ -247,7 +250,7 @@ def test_api_update_fails(hass, hass_client):
 
     assert resp.status == 404
 
-    beer_id = hass.data['shopping_list'].lists[0].items[0]['id']
+    beer_id = hass.data['shopping_list'].lists[0]['items'][0]['id']
     resp = yield from client.post(
         '/api/shopping_list/item/{}'.format(beer_id), json={
             'name': 123,
@@ -299,8 +302,8 @@ def test_deprecated_api_clear_completed(hass, hass_client):
         hass, 'test', 'HassShoppingListAddItem', {'item': {'value': 'wine'}}
     )
 
-    beer_id = hass.data['shopping_list'].lists[0].items[0]['id']
-    wine_id = hass.data['shopping_list'].lists[0].items[1]['id']
+    beer_id = hass.data['shopping_list'].lists[0]['items'][0]['id']
+    wine_id = hass.data['shopping_list'].lists[0]['items'][1]['id']
 
     client = yield from hass_client()
 
@@ -314,7 +317,7 @@ def test_deprecated_api_clear_completed(hass, hass_client):
     resp = yield from client.post('/api/shopping_list/clear_completed')
     assert resp.status == 200
 
-    items = hass.data['shopping_list'].lists[0].items
+    items = hass.data['shopping_list'].lists[0]['items']
     assert len(items) == 1
 
     assert items[0] == {
@@ -334,8 +337,8 @@ async def test_ws_clear_items(hass, hass_ws_client):
     await intent.async_handle(
         hass, 'test', 'HassShoppingListAddItem', {'item': {'value': 'wine'}}
     )
-    beer_id = hass.data['shopping_list'].lists[0].items[0]['id']
-    wine_id = hass.data['shopping_list'].lists[0].items[1]['id']
+    beer_id = hass.data['shopping_list'].lists[0]['items'][0]['id']
+    wine_id = hass.data['shopping_list'].lists[0]['items'][1]['id']
     client = await hass_ws_client(hass)
     await client.send_json({
         'id': 5,
@@ -353,7 +356,7 @@ async def test_ws_clear_items(hass, hass_ws_client):
     })
     msg = await client.receive_json()
     assert msg['success'] is True
-    items = hass.data['shopping_list'].lists[0].items
+    items = hass.data['shopping_list'].lists[0]['items']
     assert len(items) == 1
     assert items[0] == {
         'list_id': '0',
@@ -378,7 +381,7 @@ def test_deprecated_api_create(hass, hass_client):
     assert data['name'] == 'soda'
     assert data['complete'] is False
 
-    items = hass.data['shopping_list'].lists[0].items
+    items = hass.data['shopping_list'].lists[0]['items']
     assert len(items) == 1
     assert items[0]['name'] == 'soda'
     assert items[0]['complete'] is False
@@ -395,7 +398,7 @@ def test_deprecated_api_create_fail(hass, hass_client):
     })
 
     assert resp.status == 400
-    assert len(hass.data['shopping_list'].lists[0].items) == 0
+    assert len(hass.data['shopping_list'].lists[0]['items']) == 0
 
 
 async def test_ws_add_item(hass, hass_ws_client):
@@ -414,15 +417,14 @@ async def test_ws_add_item(hass, hass_ws_client):
     assert data['list_id'] == '0'
     assert data['name'] == 'soda'
     assert data['complete'] is False
-    print(hass.data['shopping_list'].lists)
-    items = hass.data['shopping_list'].lists[0].items
+    items = hass.data['shopping_list'].lists[0]['items']
     assert len(items) == 1
     assert data['list_id'] == '0'
     assert items[0]['name'] == 'soda'
     assert items[0]['complete'] is False
 
 
-async def test_ws_add_item_fail(hass, hass_ws_client):
+async def test_ws_fail_add_item(hass, hass_ws_client):
     """Test adding shopping_list item failure websocket command."""
     await async_setup_component(hass, 'shopping_list', {})
     client = await hass_ws_client(hass)
@@ -434,4 +436,4 @@ async def test_ws_add_item_fail(hass, hass_ws_client):
     })
     msg = await client.receive_json()
     assert msg['success'] is False
-    assert len(hass.data['shopping_list'].lists[0].items) == 0
+    assert len(hass.data['shopping_list'].lists[0]['items']) == 0

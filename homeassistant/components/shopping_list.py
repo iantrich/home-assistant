@@ -89,7 +89,7 @@ def async_setup(hass, config):
         list_id = call.data.get(ATTR_LIST_ID)
         name = call.data.get(ATTR_NAME)
         if name is not None:
-            data.async_add_item(list_id, name)
+            data.async_add(list_id, name)
 
     @asyncio.coroutine
     def complete_item_service(call):
@@ -105,7 +105,8 @@ def async_setup(hass, config):
         except IndexError:
             _LOGGER.error("Removing of item failed: %s cannot be found", name)
         else:
-            data.async_update(list_id, item['id'], {'name': name, 'complete': True})
+            data.async_update(list_id, item['id'],
+                {'name': name, 'complete': True})
 
     data = hass.data[DOMAIN] = ShoppingData(hass)
     yield from data.async_load()
@@ -166,10 +167,14 @@ class ShoppingData:
     def __init__(self, hass):
         """Initialize the shopping list."""
         self.hass = hass
-        self.lists = []
+        self.lists = [{
+            'name': 'Inbox',
+            'id': '0',
+            'items': []
+        }]
 
     @callback
-    def async_add_item(self, list_id, name):
+    def async_add(self, list_id, name):
         """Add a shopping list item."""
         item = {
             'list_id': list_id,
@@ -221,21 +226,13 @@ class ShoppingData:
         """Load items."""
         def load():
             """Load the items synchronously."""
-            return load_json(self.hass.config.path(PERSISTENCE), default=[])
-
-        self.lists = yield from self.hass.async_add_job(load)
-        _LOGGER.error(self.lists)
-        _LOGGER.error(type(self.lists))
-        lis = next((li for li in self.lists if li['id'] == '0'), None)
-
-        if lis is None:
-            # TODO Should I worry about migrating existing lists?
-            self.lists = {
+            return load_json(self.hass.config.path(PERSISTENCE), default=[{
                 'name': 'Inbox',
                 'id': '0',
                 'items': []
-            },
-            self.hass.async_add_job(self.save)
+            }])
+
+        self.lists = yield from self.hass.async_add_job(load)
 
     def save(self):
         """Save the items."""
@@ -255,7 +252,7 @@ class AddItemIntent(intent.IntentHandler):
         """Handle the intent."""
         slots = self.async_validate_slots(intent_obj.slots)
         item = slots['item']['value']
-        intent_obj.hass.data[DOMAIN].async_add_item('0', item)
+        intent_obj.hass.data[DOMAIN].async_add('0', item)
 
         response = intent_obj.create_response()
         response.async_set_speech(
@@ -340,7 +337,7 @@ class CreateShoppingListItemView(http.HomeAssistantView):
     @asyncio.coroutine
     def post(self, request, data):
         """Create a new shopping list item."""
-        item = request.app['hass'].data[DOMAIN].async_add_item(
+        item = request.app['hass'].data[DOMAIN].async_add(
             '0', data['name'])
         request.app['hass'].bus.async_fire(EVENT)
         return self.json(item)
@@ -381,7 +378,7 @@ def websocket_handle_items(hass, connection, msg):
 @callback
 def websocket_handle_add(hass, connection, msg):
     """Handle add item to shopping_list."""
-    item = hass.data[DOMAIN].async_add_item(msg['list_id'], msg['name'])
+    item = hass.data[DOMAIN].async_add(msg['list_id'], msg['name'])
     hass.bus.async_fire(EVENT)
     connection.send_message(websocket_api.result_message(
         msg['id'], item))
