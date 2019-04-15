@@ -54,7 +54,10 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     import plexapi.exceptions
 
     try:
-        add_entities([PlexSensor(
+        add_entities([PlexNowPlayingSensor(
+            name, plex_url, plex_user, plex_password, plex_server,
+            plex_token, config.get(CONF_VERIFY_SSL))], True)
+        add_entities([PlexPodcastSensor(
             name, plex_url, plex_user, plex_password, plex_server,
             plex_token, config.get(CONF_VERIFY_SSL))], True)
     except (plexapi.exceptions.BadRequest, plexapi.exceptions.Unauthorized,
@@ -63,7 +66,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
         return
 
 
-class PlexSensor(Entity):
+class PlexNowPlayingSensor(Entity):
     """Representation of a Plex now playing sensor."""
 
     def __init__(self, name, plex_url, plex_user, plex_password,
@@ -156,3 +159,58 @@ class PlexSensor(Entity):
             now_playing.append((now_playing_user, now_playing_title))
         self._state = len(sessions)
         self._now_playing = now_playing
+
+
+class PlexPodcastSensor(Entity):
+    """Representation of a Plex podcast subscription sensor."""
+
+    def __init__(self, name, plex_url, plex_user, plex_password,
+                 plex_server, plex_token, verify_ssl):
+        """Initialize the sensor."""
+        from plexapi.myplex import MyPlexAccount
+        from plexapi.server import PlexServer
+        from requests import Session
+
+        self._name = name
+        self._state = 0
+
+        cert_session = None
+        if not verify_ssl:
+            _LOGGER.info("Ignoring SSL verification")
+            cert_session = Session()
+            cert_session.verify = False
+
+        if plex_token:
+            self._server = PlexServer(plex_url, plex_token, cert_session)
+        elif plex_user and plex_password:
+            user = MyPlexAccount(plex_user, plex_password)
+            server = plex_server if plex_server else user.resources()[0].name
+            self._server = user.resource(server).connect()
+        else:
+            self._server = PlexServer(plex_url, None, cert_session)
+
+    @property
+    def name(self):
+        """Return the name of the sensor."""
+        return self._name
+
+    @property
+    def state(self):
+        """Return the state of the sensor."""
+        return self._state
+
+    @property
+    def unit_of_measurement(self):
+        """Return the unit this state is expressed in."""
+        return "Subscriptions"
+
+    @property
+    def device_state_attributes(self):
+        """Return the state attributes."""
+        return self._state
+
+    @Throttle(MIN_TIME_BETWEEN_UPDATES)
+    def update(self):
+        """Update method for Plex sensor."""
+        server = self._server.sessions()
+        _LOGGER.info(server)
